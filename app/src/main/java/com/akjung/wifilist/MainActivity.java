@@ -11,6 +11,7 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
+import android.support.annotation.RequiresApi;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -20,6 +21,7 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.lang.reflect.Field;
@@ -37,14 +39,24 @@ public class MainActivity extends AppCompatActivity {
     private List<ScanResult> mWIFIList;
     private List<String> mListDatalist = new ArrayList<>();
     ArrayAdapter<String> mAdapter = null;
+
+    private TextView mInfoText;
+
+    private String mCurrentSSID;
+    private WifiManager mWifiManager;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        mInfoText = findViewById(R.id.infoText);
         mListView = findViewById(R.id.wifiList);
 
         mWIFIUtil = new WIFIUtil(this);
+
+        mWifiManager = mWIFIUtil.getWifiManager();
+
         requestPermission();
     }
 
@@ -56,6 +68,7 @@ public class MainActivity extends AppCompatActivity {
                     new String[]{Manifest.permission.ACCESS_COARSE_LOCATION},
                     REQUEST_PERMISION_PERMISSION_CODE);
         } else {
+
             mWIFIUtil.registerReceiver();
             mWIFIUtil.setScanResultList(new WIFIUtil.WIFIListGetInterface() {
                 @Override
@@ -80,6 +93,7 @@ public class MainActivity extends AppCompatActivity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            mInfoText.append(wifiInfo.getSSID()+"\n");
                             Toast.makeText(MainActivity.this, wifiInfo.getSSID(), Toast.LENGTH_SHORT).show();
                         }
                     });
@@ -90,17 +104,12 @@ public class MainActivity extends AppCompatActivity {
                     android.R.layout.simple_list_item_1, mListDatalist);
             mListView.setAdapter(mAdapter);
 
-
-            //리스트뷰의 아이템을 클릭시 해당 아이템의 문자열을 가져오기 위한 처리
             mListView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
 
                 @Override
                 public void onItemClick(AdapterView<?> adapterView,
                                         View view, int position, long id) {
-
                     connectWifi(position);
-
-
                 }
             });
         }
@@ -119,92 +128,113 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    public void clickRemoveNetwork(View view) {
+
+        mWifiManager.disconnect();
+        //app이 생성한 WIFI는 삭제 가능
+        final List<WifiConfiguration> configurations = mWifiManager.getConfiguredNetworks();
+        for(final WifiConfiguration config : configurations) {
+            if(config.SSID.equals(mCurrentSSID)) {
+                mWifiManager.removeNetwork(config.networkId);
+            }
+        }
+    }
 
     private void connectWifi(int position) {
-        //setMobileDataEnabled(this, false);
 
         ScanResult scanResult = mWIFIList.get(position);
+
+        mCurrentSSID = scanResult.SSID;
+        mInfoText.append("set :" + mCurrentSSID );
         if("[ESS]".equals(scanResult.capabilities)) {
             open(scanResult);
+        }  else if(scanResult.capabilities.contains("WPA2")){
+            wpa2(scanResult);
         }
     }
 
-    private void setMobileDataEnabled(Context context, boolean enabled) {
-        final ConnectivityManager conman =
-       (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        try {
-            final Class conmanClass = Class.forName(conman.getClass().getName());
-            final Field iConnectivityManagerField = conmanClass.getDeclaredField("mService");
-            iConnectivityManagerField.setAccessible(true);
-            final Object iConnectivityManager = iConnectivityManagerField.get(conman);
-            final Class iConnectivityManagerClass = Class.forName(
-                    iConnectivityManager.getClass().getName());
-            final Method setMobileDataEnabledMethod = iConnectivityManagerClass
-                    .getDeclaredMethod("setMobileDataEnabled", Boolean.TYPE);
-            setMobileDataEnabledMethod.setAccessible(true);
 
-            setMobileDataEnabledMethod.invoke(iConnectivityManager, enabled);
-        } catch (ClassNotFoundException e) {
-            e.printStackTrace();
-        } catch (InvocationTargetException e) {
-            e.printStackTrace();
-        } catch (NoSuchMethodException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (NoSuchFieldException e) {
-            e.printStackTrace();
+    private int getMaxConfigurationPriority(final WifiManager wifiManager) {
+        final List<WifiConfiguration> configurations = wifiManager.getConfiguredNetworks();
+        int maxPriority = 0;
+        for(final WifiConfiguration config : configurations) {
+            if(config.priority > maxPriority)
+                maxPriority = config.priority;
         }
-    }
 
-    private boolean isMobileDataEnabledFromLollipop(Context context) {
-        boolean state = false;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            state = Settings.Global.getInt(context.getContentResolver(), "mobile_data", 0) == 1;
-        }
-        return state;
+        return maxPriority;
     }
 
     private void open(ScanResult scanResult) {
 
         WifiConfiguration wfc = new WifiConfiguration();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            wfc.isHomeProviderNetwork = true;
+        }
         wfc.SSID = "\"".concat(scanResult.SSID).concat("\"");
-//        wfc.status = WifiConfiguration.Status.DISABLED;
-//        wfc.priority = 40;
-//        wfc.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE);
-//        wfc.allowedProtocols.set(WifiConfiguration.Protocol.RSN);
-//        wfc.allowedProtocols.set(WifiConfiguration.Protocol.WPA);
-//        wfc.allowedAuthAlgorithms.clear();
-//        wfc.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.CCMP);
-//        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP40);
-//        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP104);
-//        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.CCMP);
-//        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.TKIP);
+        wfc.status = WifiConfiguration.Status.DISABLED;
+        wfc.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE);
+        wfc.allowedAuthAlgorithms.set(WifiConfiguration.AuthAlgorithm.OPEN);
+
+        wfc.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.CCMP);
+        wfc.allowedProtocols.set(WifiConfiguration.Protocol.RSN);
+        wfc.allowedProtocols.set(WifiConfiguration.Protocol.WPA);
+
+        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP40);
+        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP104);
+        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.CCMP);
+        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.TKIP);
 
 
-        int networkId = mWIFIUtil.getWifiManager().addNetwork(wfc);
+
+        int networkId = mWifiManager.addNetwork(wfc);
         Toast.makeText(MainActivity.this, "networkId =" + networkId, Toast.LENGTH_SHORT).show();
         if (networkId != -1) {
 
-            mWIFIUtil.getWifiManager().enableNetwork(networkId, true);
+            mWifiManager.enableNetwork(networkId, true);
 
         } else {
             int Id = checkPreviousConfiguration(scanResult.SSID);
             {
-                mWIFIUtil.getWifiManager().enableNetwork(networkId, true);
+                mWifiManager.enableNetwork(networkId, true);
             }
             Toast.makeText(MainActivity.this, networkId+" remove =" + Id, Toast.LENGTH_SHORT).show();
         }
+    }
 
 
+    private void wpa2(ScanResult scanResult) {
+        String password = "dddddddddd";
+
+        WifiConfiguration wfc = new WifiConfiguration();
+        wfc.SSID = "\"".concat(scanResult.SSID).concat("\"");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            wfc.isHomeProviderNetwork = true;
+        }
+        wfc.allowedAuthAlgorithms.set(WifiConfiguration.AuthAlgorithm.OPEN);
+        wfc.allowedProtocols.set(WifiConfiguration.Protocol.RSN);
+        wfc.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK);
+        wfc.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.CCMP);
+        wfc.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.TKIP);
+        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.CCMP);
+        wfc.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.TKIP);
+        wfc.preSharedKey = "\"".concat(password).concat("\"");
 
 
+        int networkId = mWifiManager.addNetwork(wfc);
+        Toast.makeText(MainActivity.this, "networkId =" + networkId, Toast.LENGTH_SHORT).show();
+        if (networkId != -1) {
+            
+            mWifiManager.enableNetwork(networkId, true);
+
+        }
 
     }
 
+
     public int checkPreviousConfiguration(String ssid) {
         ssid = ssid.replace("\"", "");
-        List<WifiConfiguration> configs = mWIFIUtil.getWifiManager().getConfiguredNetworks();
+        List<WifiConfiguration> configs = mWifiManager.getConfiguredNetworks();
         for(WifiConfiguration config : configs) {
            String configSSID = config.SSID.replace("\"", "");
             if(configSSID.compareTo(ssid) == 0) {
